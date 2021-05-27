@@ -1,0 +1,67 @@
+#!/bin/sh
+
+set -o errexit
+set -o nounset
+
+usage() 
+{
+    cat <<-'END'
+Builds a commit with only the content of subdir `arrow-flight`, without `build.rs`;
+Since build.rs depends on an absent file
+
+>    println!("cargo:rerun-if-changed=../format/Flight.proto");
+
+which cause this crate to be re-built every single time no matter whether file changed.
+
+See https://github.com/rust-lang/cargo/pull/8927/files#diff-197a732275c32bdbdb079bdd92ac8a4ba585ee556ea978e9e661804eb76ce9eeR229-R232
+
+>  * A build script prints `cargo:rerun-if-changed=foo` where `foo` is a file that
+>    doesn't exist and nothing generates it. In this case Cargo will keep running
+>    the build script thinking it will generate the file but nothing ever does. The
+>    fix is to avoid printing `rerun-if-changed` in this scenario.
+
+Usage:
+    $0 4.1.0
+    # Output:
+    # ...
+    # commit without build.rs:
+    # 4.1.0-wihtout-build-rs
+
+    # push:
+    git push 4.1.0-wihtout-build-rs
+END
+}
+
+if [ ".$1" == ".-h" ] || [ ".$1" == ".--help" ]; then
+    usage
+    exit 0
+fi
+
+latest_tag=$(git tag | head -n1)
+rev=${1-$latest_tag}
+
+# find the root treeish
+root_treeish=$(git rev-parse $rev^{tree})
+echo root treeish: $root_treeish
+
+# find the treeish of dir arrow-flight
+arrow_flight_treeish=$(git ls-tree $root_treeish arrow-flight | awk '{print $3}')
+echo
+echo arrow-flight treeish: $arrow_flight_treeish
+git ls-tree $arrow_flight_treeish
+
+without_build=$(git ls-tree $arrow_flight_treeish | grep -v build.rs | git mktree)
+
+echo
+echo treeish without build.rs: $without_build
+git ls-tree $without_build
+
+# create a new commit with only the content of dir arrow-flight
+hsh=$(echo "auto built $rev without build.rs" | git commit-tree $without_build -p $rev)
+
+built_ref=$rev-wihtout-build-rs
+git update-ref refs/heads/$built_ref $hsh
+
+echo
+echo commit without build.rs:
+echo $built_ref
